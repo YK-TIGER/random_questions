@@ -1,43 +1,65 @@
+import re
 import random
-from keybert import KeyBERT
-from passage import passages
+from docx import Document
+from docx.shared import Pt
 
-kw_model = KeyBERT()
+def load_passages_from_txt(filename="passages.txt"):
+    with open(filename, 'r', encoding='utf-8') as f:
+        text = f.read()
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    passages = re.split(r'\n{3,}', text)
+    return [p.strip() for p in passages if p.strip()]
 
-def generate_title(text):
-    keywords = kw_model.extract_keywords(text, top_n=5, keyphrase_ngram_range=(1, 2))
-    if not keywords:
-        return "No Title"
-    words = [kw[0] for kw in keywords]
-    selected = random.sample(words, min(3, len(words)))
-    title = ", ".join(selected)
-    return title
+def split_sentences(passage):
+    # 강화된 문장 분리 기준: 마침표, 느낌표, 물음표 다음 공백
+    pattern = r'(?<=[.!?])(?<!\.\.\.)(?<![A-Z][a-z]\.)(?<!\b[A-Z]\.)(?<!\.\w)(?=\s)'
+    sentences = re.split(pattern, passage)
+    return [s.strip() for s in sentences if s.strip()]
 
-def create_title_questions(passages):
-    questions = []
-    answers = []
+def num_to_circle(num):
+    if 1 <= num <= 20:
+        return chr(0x2460 + num - 1)
+    else:
+        return f"({num})"
+
+def create_questions_and_answers(passages):
+    questions_doc = Document()
+    answers_doc = Document()
+
+    answers_doc.add_paragraph("※ 답안지\n")
+
     for idx, passage in enumerate(passages, 1):
-        title = generate_title(passage)
-        question = f"Passage {idx}의 제목으로 가장 적절한 것은?\n\n{passage}\n"
-        questions.append(question)
-        answers.append(f"Passage {idx} 정답: {title}\n")
-    return questions, answers
+        sentences = split_sentences(passage)
 
-def save_to_file(filename, contents):
-    with open(filename, "w", encoding="utf-8") as f:
-        for item in contents:
-            f.write(item)
-            f.write("\n\n")
+        if len(sentences) < 2:
+            continue  # 문장이 너무 짧으면 건너뜀
 
-def main():
-    random.seed()  # 매 실행마다 다르게
+        # 무작위 위치 선정 (첫 문장은 제외)
+        missing_index = random.randint(1, len(sentences) - 1)
+        missing_sentence = sentences.pop(missing_index)
 
-    questions, answers = create_title_questions(passages)
+        # 문제 본문 생성
+        marked_sentences = []
+        for i, sent in enumerate(sentences, 1):
+            punctuation = '' if sent.endswith(('.', '?', '!')) else '.'
+            marked_sentences.append(f"{sent}{punctuation} {num_to_circle(i)}")
 
-    save_to_file("title_questions.txt", questions)
-    save_to_file("title_answers.txt", answers)
+        problem_text = ' '.join(marked_sentences)
 
-    print("문제와 답안을 각각 title_questions.txt, title_answers.txt에 저장했습니다.")
+        # 문제 작성
+        questions_doc.add_paragraph(f"{idx}. 다음 문장이 들어갈 곳으로 알맞은 곳은?")
+        questions_doc.add_paragraph("")  # 빈 줄
+        questions_doc.add_paragraph(missing_sentence)
+        questions_doc.add_paragraph("")  # 빈 줄
+        questions_doc.add_paragraph(problem_text)
+        questions_doc.add_paragraph("")  # 문제 간 간격
+
+        # 답안 작성
+        answers_doc.add_paragraph(f"{idx}. {num_to_circle(missing_index)}")
+
+    questions_doc.save("questions.docx")
+    answers_doc.save("answers.docx")
 
 if __name__ == "__main__":
-    main()
+    passages = load_passages_from_txt("passages.txt")
+    create_questions_and_answers(passages)
